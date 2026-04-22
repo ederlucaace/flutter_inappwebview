@@ -74,7 +74,12 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate,
     
     init(id: Any?, plugin: SwiftFlutterPlugin?, frame: CGRect, configuration: WKWebViewConfiguration,
          contextMenu: [String: Any]?, userScripts: [UserScript] = []) {
+        print("🧭 InAppWebView.swift — código DO CACHE EM USO!")
+
         super.init(frame: frame, configuration: configuration)
+        self.uiDelegate = self
+        print("🎯 InAppWebView: WKUIDelegate configurado corretamente")
+
         self.id = id
         self.plugin = plugin
         if let id = id, let registrar = plugin?.registrar {
@@ -97,6 +102,20 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate,
         panGestureRecognizer = UIPanGestureRecognizer()
         panGestureRecognizer.delegate = self
         panGestureRecognizer.addTarget(self, action: #selector(endDraggingDetected))
+        print("🧩 Classe ativa da WebView:", type(of: self))
+        print("🧩 uiDelegate atual:", String(describing: self.uiDelegate))
+
+    }
+
+    // MARK: - Garantir que o WKUIDelegate esteja sempre apontando para self
+    public override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+
+        // Reatribui o delegate quando a WebView entra na hierarquia
+        if self.uiDelegate !== self {
+            print("⚙️ Reatribuindo WKUIDelegate → self (forçado em runtime)")
+            self.uiDelegate = self
+        }
     }
     
     override public var frame: CGRect {
@@ -3544,4 +3563,97 @@ if(window.\(JavaScriptBridgeJS.get_JAVASCRIPT_BRIDGE_NAME())[\(_callHandlerID)] 
     deinit {
         debugPrint("InAppWebView - dealloc")
     }
+
+    // ===============================================
+    // Adicione esse método DENTRO da classe, logo antes da última chave `}`
+    // ===============================================
+
+    /*public func webView(_ webView: WKWebView,
+                    runOpenPanelWith parameters: Any?,
+                    initiatedByFrame frame: WKFrameInfo,
+                    completionHandler: @escaping ([URL]?) -> Void) {
+
+        print("✅ runOpenPanelWith (plugin) chamado — interceptando input type=file")
+
+        // Garante que o plugin e o registrar existem
+        guard let registrar = plugin?.registrar else {
+            print("⚠️ Não foi possível acessar o registrar do plugin")
+            completionHandler(nil)
+            return
+        }
+
+        // Cria o canal Flutter para comunicação com o app
+        let channel = FlutterMethodChannel(
+            name: "onIosFileChooser",
+            binaryMessenger: registrar.messenger()
+        )
+
+        // Chama o Flutter para abrir o seletor customizado (BottomSheet)
+        channel.invokeMethod("onIosFileChooser", arguments: nil) { result in
+            if let paths = result as? [String] {
+                let urls = paths.compactMap { URL(fileURLWithPath: $0) }
+                completionHandler(urls)
+            } else {
+                completionHandler(nil)
+            }
+        }
+    }*/
+    // MARK: - Interceptar input type="file" (iOS 15+ compatível com 18+)
+
+    // MARK: - Interceptar input type="file" (iOS 15+ compatível com 18.4+)
+
+    @available(iOS 18.4, *)
+    public func webView(_ webView: WKWebView,
+                        runOpenPanelWith parameters: WKOpenPanelParameters,
+                        initiatedByFrame frame: WKFrameInfo,
+                        completionHandler: @escaping ([URL]?) -> Void) {
+        print("✅ runOpenPanelWith (iOS 18.4+) chamado — interceptando input type=file")
+        handleFileChooser(webView: webView, completionHandler: completionHandler)
+    }
+
+    @available(iOS, introduced: 15.0, obsoleted: 18.4)
+    public func webView(_ webView: WKWebView,
+                        runOpenPanelWith parameters: Any?,
+                        initiatedByFrame frame: WKFrameInfo,
+                        completionHandler: @escaping ([URL]?) -> Void) {
+        print("✅ runOpenPanelWith (iOS <18.4) chamado — interceptando input type=file")
+        handleFileChooser(webView: webView, completionHandler: completionHandler)
+    }
+
+    // MARK: - Handler genérico para chamada Flutter
+    private func handleFileChooser(webView: WKWebView,
+                                completionHandler: @escaping ([URL]?) -> Void) {
+        print("📂 WKUIDelegate ativo, chamando canal Flutter…")
+
+        guard let registrar = plugin?.registrar else {
+            print("⚠️ Não foi possível acessar o registrar do plugin principal.")
+            completionHandler(nil)
+            return
+        }
+
+        let channel = FlutterMethodChannel(name: "onIosFileChooser",
+                                        binaryMessenger: registrar.messenger())
+
+        channel.invokeMethod("onIosFileChooser", arguments: nil) { (result: Any?) in
+            if let paths = result as? [String] {
+                print("📸 Recebido do Flutter \(paths.count) arquivo(s).")
+                let urls = paths.compactMap { path -> URL? in
+                    if FileManager.default.fileExists(atPath: path) {
+                        return URL(fileURLWithPath: path)
+                    } else {
+                        print("⚠️ Caminho inválido: \(path)")
+                        return nil
+                    }
+                }
+                completionHandler(urls)
+            } else {
+                print("❌ Nenhum caminho recebido do Flutter — cancelando seleção.")
+                completionHandler(nil)
+            }
+        }
+    }
+    //Atualizado 22/04/2026
 }
+
+
+
